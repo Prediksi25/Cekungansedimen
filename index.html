@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Perkiraan Titik Sumur yang Mengandung Minyak</title>
+
+<style>
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: radial-gradient(circle at top, #001f3f, #000);
+  color: white;
+  overflow: hidden;
+}
+
+#title {
+  position: absolute;
+  top: 10px;
+  width: 100%;
+  text-align: center;
+  font-weight: bold;
+  font-size: 18px;
+  z-index: 10;
+}
+
+#info {
+  position: absolute;
+  bottom: 15px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.7);
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  text-align: center;
+}
+
+canvas {
+  display: block;
+}
+</style>
+</head>
+
+<body>
+
+<div id="title">Perkiraan Titik Sumur yang Mengandung Minyak</div>
+<canvas id="map"></canvas>
+
+<div id="info">
+  Arahkan kamera / HP ke area tanah<br>
+  Sistem hanya memprediksi – tidak menjamin akurasi
+</div>
+
+<script>
+const canvas = document.getElementById("map");
+const ctx = canvas.getContext("2d");
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", resize);
+
+// Fake GPS
+navigator.geolocation.getCurrentPosition(pos => {
+  window.lat = pos.coords.latitude.toFixed(6);
+  window.lon = pos.coords.longitude.toFixed(6);
+});
+
+// Gerak HP (arah kamera)
+let angle = 0;
+window.addEventListener("deviceorientation", e => {
+  angle = e.alpha || 0;
+});
+
+function randomDepth() {
+  return Math.floor(400 + Math.random() * 600);
+}
+
+function randomColor() {
+  const colors = ["red", "yellow", "blue"];
+  return colors[Math.floor(Math.random() * colors.length)];
+}
+
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // Background grid
+  ctx.strokeStyle = "rgba(255,255,255,0.05)";
+  for(let i=0;i<canvas.width;i+=40){
+    ctx.beginPath();
+    ctx.moveTo(i,0);
+    ctx.lineTo(i,canvas.height);
+    ctx.stroke();
+  }
+  for(let i=0;i<canvas.height;i+=40){
+    ctx.beginPath();
+    ctx.moveTo(0,i);
+    ctx.lineTo(canvas.width,i);
+    ctx.stroke();
+  }
+
+  // Titik dari arah kamera
+  const x = canvas.width/2 + Math.sin(angle*Math.PI/180)*120;
+  const y = canvas.height/2 + Math.cos(angle*Math.PI/180)*120;
+
+  const color = randomColor();
+  const depth = randomDepth();
+
+  ctx.beginPath();
+  ctx.arc(x,y,14,0,Math.PI*2);
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 20;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "white";
+  ctx.font = "12px Arial";
+  ctx.fillText(`Lat: ${window.lat || "-"}`, x+18, y-8);
+  ctx.fillText(`Lon: ${window.lon || "-"}`, x+18, y+6);
+  ctx.fillText(`Kedalaman: ${depth} m`, x+18, y+20);
+
+  requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+
+</body>
+</html>
