@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HCPrediksi – Perkiraan Titik Sumur</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<style>
+html,body{margin:0;height:100%;font-family:Arial;background:#000}
+#map{height:100%}
+
+/* Header */
+#header{
+  position:absolute;top:10px;width:100%;
+  text-align:center;color:#fff;z-index:1000;
+  pointer-events:none
+}
+#logo{font-size:18px;font-weight:bold}
+#subtitle{font-size:11px;opacity:.7}
+
+/* Loading */
+#loading{
+  position:fixed;inset:0;background:rgba(0,0,0,.9);
+  display:flex;flex-direction:column;justify-content:center;
+  align-items:center;z-index:2000;color:#fff;font-size:13px
+}
+.spinner{
+  width:34px;height:34px;border:4px solid rgba(255,255,255,.2);
+  border-top:4px solid red;border-radius:50%;
+  animation:spin 1s linear infinite;margin-bottom:10px
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Note */
+#note{
+  position:absolute;bottom:10px;left:50%;
+  transform:translateX(-50%);
+  background:rgba(0,0,0,.6);
+  padding:6px 10px;border-radius:8px;
+  font-size:10px;color:#ccc;z-index:1000
+}
+
+/* Depth Panel */
+#depthPanel{
+  position:absolute;right:10px;bottom:60px;
+  width:160px;height:350px;
+  background:linear-gradient(180deg,rgba(0,0,0,.85),rgba(0,0,0,.55));
+  border-radius:14px;padding:10px;
+  z-index:1200;box-shadow:0 0 20px rgba(0,0,0,.6);
+  display:none
+}
+#depthTitle{text-align:center;font-size:12px;color:#fff;margin-bottom:6px}
+#depthChart{width:100%;height:240px}
+
+/* Pressure */
+#pressure{margin-top:6px;height:8px;background:rgba(255,255,255,.15);
+  border-radius:6px;overflow:hidden}
+#pressureBar{
+  height:100%;width:0%;
+  background:linear-gradient(90deg,#2b7cff,#ffd500,#ff3b3b);
+  transition:width .8s ease
+}
+
+/* Buttons */
+button{
+  margin-top:6px;width:100%;padding:6px;
+  font-size:11px;border-radius:8px;
+  background:#111;color:#fff;
+  border:1px solid rgba(255,255,255,.25)
+}
+</style>
+</head>
+
+<body>
+
+<div id="header">
+  <div id="logo">HCPrediksi</div>
+  <div id="subtitle">Perkiraan Titik Sumur yang Mengandung Minyak</div>
+</div>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div>Menganalisis lokasi GPS…</div>
+</div>
+
+<div id="map"></div>
+
+<div id="depthPanel">
+  <div id="depthTitle">Grafik Kedalaman</div>
+  <canvas id="depthChart"></canvas>
+  <div id="pressure"><div id="pressureBar"></div></div>
+  <button id="exportChartBtn">Export Grafik</button>
+  <button id="exportAllBtn">Export Peta + Grafik</button>
+</div>
+
+<div id="note">
+Simulasi visual berbasis GPS • Bukan data geologi atau eksplorasi migas
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+<script>
+/* ===== MAP ===== */
+const map=L.map('map',{zoomControl:true,attributionControl:false})
+.setView([0,0],5);
+
+map.dragging.disable();
+map.scrollWheelZoom.disable();
+map.doubleClickZoom.disable();
+map.touchZoom.disable();
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19})
+.addTo(map);
+
+/* ===== DUMMY LOGIC ===== */
+function dummyResult(lat,lon){
+  const seed=Math.abs(Math.sin(lat+lon)*10000)|0;
+  if(seed%3===0) return {label:'ADA MINYAK',color:'red',potensi:78,depth:600+(seed%600)};
+  if(seed%3===1) return {label:'SEDANG',color:'yellow',potensi:44,depth:400+(seed%400)};
+  return {label:'KOSONG',color:'blue',potensi:12,depth:null};
+}
+
+/* ===== GRAPH ===== */
+const chart=document.getElementById("depthChart");
+const dctx=chart.getContext("2d");
+chart.width=160;chart.height=240;
+
+function drawScale(){
+  dctx.strokeStyle="rgba(255,255,255,.15)";
+  dctx.fillStyle="rgba(255,255,255,.5)";
+  dctx.font="9px Arial";
+  [0,400,800,1200,1500].forEach(m=>{
+    const y=chart.height-(m/1500)*chart.height;
+    dctx.beginPath();dctx.moveTo(30,y);dctx.lineTo(chart.width,y);dctx.stroke();
+    dctx.fillText(m+" m",2,y+3);
+  });
+}
+
+function drawCracks(y,h){
+  dctx.strokeStyle="rgba(255,255,255,.25)";
+  for(let i=0;i<6;i++){
+    const x=40+Math.random()*60;
+    const yy=y+Math.random()*h;
+    dctx.beginPath();
+    dctx.moveTo(x,yy);
+    dctx.lineTo(x+(Math.random()*20-10),yy+(Math.random()*30));
+    dctx.stroke();
+  }
+}
+
+function animateDepth(target,color){
+  let cur=0;
+  function frame(){
+    dctx.clearRect(0,0,chart.width,chart.height);
+    drawScale();
+    const h=(cur/1500)*chart.height;
+    const y=chart.height-h;
+
+    dctx.fillStyle="#3d2a14";
+    dctx.fillRect(40,y,60,h);
+
+    dctx.fillStyle=color;
+    dctx.shadowColor=color;
+    dctx.shadowBlur=12;
+    dctx.fillRect(44,y,52,h);
+    dctx.shadowBlur=0;
+
+    drawCracks(y,h);
+
+    dctx.fillStyle="#fff";
+    dctx.font="11px Arial";
+    dctx.fillText("± "+Math.round(cur)+" m",45,y-6);
+
+    if(cur<target){cur+=20;requestAnimationFrame(frame);}
+  }
+  frame();
+}
+
+function setPressure(depth){
+  const p=Math.min(100,Math.max(20,Math.round(depth/15)));
+  document.getElementById("pressureBar").style.width=p+"%";
+}
+
+/* ===== EXPORT ===== */
+document.getElementById("exportChartBtn").onclick=()=>{
+  const a=document.createElement("a");
+  a.download="HCPrediksi_Grafik.png";
+  a.href=chart.toDataURL("image/png");
+  a.click();
+};
+
+document.getElementById("exportAllBtn").onclick=async()=>{
+  const mapCanvas=await html2canvas(document.getElementById("map"),{useCORS:true});
+  const final=document.createElement("canvas");
+  const ctx=final.getContext("2d");
+  final.width=mapCanvas.width;
+  final.height=mapCanvas.height;
+  ctx.drawImage(mapCanvas,0,0);
+  ctx.drawImage(chart,final.width-chart.width-20,final.height-chart.height-20);
+
+  ctx.fillStyle="rgba(0,0,0,.6)";
+  ctx.fillRect(0,0,final.width,36);
+  ctx.fillStyle="#fff";
+  ctx.font="16px Arial";
+  ctx.fillText("HCPrediksi – Perkiraan Titik Sumur",15,24);
+
+  const a=document.createElement("a");
+  a.download="HCPrediksi_Peta_dan_Grafik.png";
+  a.href=final.toDataURL("image/png");
+  a.click();
+};
+
+/* ===== GPS ===== */
+let firstFix=true;
+navigator.geolocation.watchPosition(pos=>{
+  const lat=pos.coords.latitude;
+  const lon=pos.coords.longitude;
+
+  if(firstFix){
+    map.flyTo([lat,lon],15,{duration:1.2});
+    document.getElementById("loading").style.display="none";
+
+    const r=dummyResult(lat,lon);
+
+    L.circleMarker([lat,lon],{
+      radius:6,color:'#7aa2ff',fillColor:'#7aa2ff',fillOpacity:1
+    }).addTo(map).bindPopup(`
+      <b>Status:</b> ${r.label}<br>
+      <b>Potensi:</b> ${r.potensi}%<br>
+      ${r.depth?`<b>Kedalaman:</b> ± ${r.depth} m<br>`:''}
+      <small>Lat ${lat.toFixed(6)}<br>Lon ${lon.toFixed(6)}</small>
+    `).openPopup();
+
+    L.circle([lat,lon],{
+      radius:1500,color:r.color,fillColor:r.color,fillOpacity:.08
+    }).addTo(map);
+
+    if(r.depth){
+      document.getElementById("depthPanel").style.display="block";
+      animateDepth(r.depth,r.color);
+      setPressure(r.depth);
+    }
+    firstFix=false;
+  }
+},{
+  enableHighAccuracy:true,maximumAge:0,timeout:10000
+});
+</script>
+
+</body>
+</html>
